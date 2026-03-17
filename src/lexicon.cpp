@@ -5,7 +5,7 @@
 //  Created by Piotr Marcol on 09/03/2026.
 //
 
-#include "../include/lexicon/lexicon.hpp"
+#include <lexicon/lexicon.hpp>
 
 #include <algorithm>
 #include <functional>
