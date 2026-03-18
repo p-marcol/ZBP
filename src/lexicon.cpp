@@ -8,6 +8,7 @@
 #include <lexicon/lexicon.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <functional>
 #include <stdexcept>
 #include <utility>
@@ -42,7 +43,9 @@ void Lexicon::buildFromSorted(const std::vector<std::string> &words) {
 
     root_ = createState(false);
     for (const auto &word : words) {
-        insertSorted(word);
+        // Normalize at the boundary so the DFA and minimization operate on one
+        // canonical representation of each key.
+        insertSorted(normalize(word));
     }
 
     finish();
@@ -53,9 +56,10 @@ bool Lexicon::contains(const value_type word) const {
         return false;
     }
 
+    const std::string normalizedWord = normalize(word);
     StateId current = root_;
 
-    for (char c : word) {
+    for (char c : normalizedWord) {
         const auto &transitions = states_[current].transitions;
 
         const auto it =
@@ -79,6 +83,14 @@ Lexicon::size_type Lexicon::size() const noexcept { return wordCount_; }
 
 Lexicon::size_type Lexicon::stateCount() const noexcept {
     return states_.size();
+}
+
+Lexicon::size_type Lexicon::reachableStateCount() const noexcept {
+    return reachableMetrics().stateCount;
+}
+
+Lexicon::size_type Lexicon::transitionCount() const noexcept {
+    return reachableMetrics().transitionCount;
 }
 
 void Lexicon::clear() {
@@ -203,6 +215,55 @@ std::size_t Lexicon::commonPrefixLength(std::string_view a,
 Lexicon::StateId Lexicon::createState(bool isFinal) {
     states_.push_back(State{isFinal, {}});
     return states_.size() - 1;
+}
+
+std::string Lexicon::normalize(const std::string &word) const {
+    if (caseMode_ == CaseMode::Sensitive) {
+        return word;
+    }
+
+    std::string normalized = word;
+    std::transform(
+        normalized.begin(), normalized.end(), normalized.begin(),
+        [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+    return normalized;
+}
+
+Lexicon::ReachableMetrics Lexicon::reachableMetrics() const noexcept {
+    if (root_ == invalidState) {
+        return {};
+    }
+
+    std::vector<unsigned char> visited(states_.size(), 0);
+    std::vector<StateId> stack;
+    stack.reserve(states_.size());
+    stack.push_back(root_);
+    visited[root_] = 1;
+
+    ReachableMetrics metrics;
+
+    while (!stack.empty()) {
+        const StateId stateId = stack.back();
+        stack.pop_back();
+
+        ++metrics.stateCount;
+
+        const auto &transitions = states_[stateId].transitions;
+        metrics.transitionCount += transitions.size();
+
+        for (const auto &transition : transitions) {
+            if (visited[transition.target] != 0) {
+                continue;
+            }
+
+            visited[transition.target] = 1;
+            stack.push_back(transition.target);
+        }
+    }
+
+    return metrics;
 }
 
 } // namespace lexicon

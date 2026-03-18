@@ -16,6 +16,11 @@
 
 namespace lexicon {
 
+enum class CaseMode {
+    Sensitive,
+    Insensitive
+};
+
 /**
  * @brief Minimal deterministic finite automaton built from a sorted word list.
  *
@@ -28,7 +33,8 @@ class Lexicon {
     using value_type = std::string;
     using size_type = std::size_t;
 
-    Lexicon() = default;
+    explicit Lexicon(CaseMode mode = CaseMode::Insensitive)
+        : caseMode_(mode) {}
 
     /**
      * @brief Rebuilds the automaton from a lexicographically sorted word list.
@@ -36,7 +42,8 @@ class Lexicon {
      * The current contents are discarded before construction starts. Words that
      * compare equal to the previous entry are skipped.
      *
-     * @param words Source dictionary ordered lexicographically.
+     * @param words Source dictionary ordered lexicographically for the current
+     * case mode.
      * @throws std::invalid_argument If the input is not sorted.
      */
     void buildFromSorted(const std::vector<std::string> &words);
@@ -66,9 +73,20 @@ class Lexicon {
      * @brief Returns the number of allocated states stored by the builder.
      *
      * This is a structural metric useful for debugging and comparisons. It does
-     * not attempt to compact the internal storage after state merging.
+     * not attempt to compact the internal storage after state merging, so it
+     * can be larger than the number of states reachable in the final DFA.
      */
     [[nodiscard]] size_type stateCount() const noexcept;
+
+    /**
+     * @brief Returns the number of states reachable from the root state.
+     */
+    [[nodiscard]] size_type reachableStateCount() const noexcept;
+
+    /**
+     * @brief Returns the number of outgoing transitions from reachable states.
+     */
+    [[nodiscard]] size_type transitionCount() const noexcept;
 
     /**
      * @brief Removes all states and returns the object to its initial state.
@@ -108,6 +126,11 @@ class Lexicon {
     struct SignatureHash {
         [[nodiscard]] std::size_t
         operator()(const StateSignature &sig) const noexcept;
+    };
+
+    struct ReachableMetrics {
+        size_type stateCount = 0;
+        size_type transitionCount = 0;
     };
 
     /**
@@ -159,6 +182,16 @@ class Lexicon {
      */
     [[nodiscard]] StateId createState(bool isFinal);
 
+    /**
+     * @brief Normalizes one lookup key before build/search.
+     */
+    [[nodiscard]] std::string normalize(const std::string &word) const;
+
+    /**
+     * @brief Counts reachable states and transitions from the root.
+     */
+    [[nodiscard]] ReachableMetrics reachableMetrics() const noexcept;
+
     std::vector<State> states_;
     std::unordered_map<StateSignature, StateId, SignatureHash> registry_;
     std::vector<UncheckedNode> uncheckedPath_;
@@ -167,6 +200,9 @@ class Lexicon {
     size_type wordCount_ = 0;
     bool finalized_ = false;
     StateId root_ = invalidState;
+    // The mode is fixed at construction because the DFA is built from
+    // normalized keys; switching later would make its contents inconsistent.
+    CaseMode caseMode_ = CaseMode::Insensitive;
 };
 
 }; // namespace lexicon
