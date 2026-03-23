@@ -89,6 +89,16 @@ class Lexicon {
     [[nodiscard]] size_type transitionCount() const noexcept;
 
     /**
+     * @brief Exports the reachable part of the automaton as Graphviz DOT.
+     */
+    [[nodiscard]] std::string exportToDot() const;
+
+    /**
+     * @brief Writes the Graphviz DOT representation to a file.
+     */
+    bool exportToDotFile(const std::string &path) const;
+
+    /**
      * @brief Removes all states and returns the object to its initial state.
      */
     void clear();

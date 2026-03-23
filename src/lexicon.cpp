@@ -9,11 +9,60 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <functional>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
 namespace lexicon {
+
+namespace {
+
+std::string escapeDotLabel(char symbol) {
+    switch (symbol) {
+    case '\\':
+        return "\\\\";
+    case '"':
+        return "\\\"";
+    default:
+        return std::string(1, symbol);
+    }
+}
+
+void appendLowercasePolishUtf8(std::string &normalized,
+                               unsigned char firstByte,
+                               unsigned char secondByte) {
+    if (firstByte == 0xC3U && secondByte == 0x93U) {
+        normalized.push_back(static_cast<char>(0xC3U));
+        normalized.push_back(static_cast<char>(0xB3U));
+        return;
+    }
+
+    if (firstByte == 0xC4U) {
+        if (secondByte == 0x84U || secondByte == 0x86U ||
+            secondByte == 0x98U) {
+            normalized.push_back(static_cast<char>(firstByte));
+            normalized.push_back(static_cast<char>(secondByte + 1U));
+            return;
+        }
+    }
+
+    if (firstByte == 0xC5U) {
+        if (secondByte == 0x81U || secondByte == 0x83U ||
+            secondByte == 0x9AU || secondByte == 0xB9U ||
+            secondByte == 0xBBU) {
+            normalized.push_back(static_cast<char>(firstByte));
+            normalized.push_back(static_cast<char>(secondByte + 1U));
+            return;
+        }
+    }
+
+    normalized.push_back(static_cast<char>(firstByte));
+    normalized.push_back(static_cast<char>(secondByte));
+}
+
+} // namespace
 
 bool Lexicon::Transition::operator==(const Transition &other) const noexcept {
     return symbol == other.symbol && target == other.target;
@@ -91,6 +140,75 @@ Lexicon::size_type Lexicon::reachableStateCount() const noexcept {
 
 Lexicon::size_type Lexicon::transitionCount() const noexcept {
     return reachableMetrics().transitionCount;
+}
+
+std::string Lexicon::exportToDot() const {
+    std::ostringstream dot;
+    dot << "digraph Lexicon {\n";
+    dot << "    rankdir=LR;\n";
+    dot << "    node [shape=circle];\n";
+
+    if (root_ == invalidState) {
+        dot << "}\n";
+        return dot.str();
+    }
+
+    std::vector<unsigned char> visited(states_.size(), 0);
+    std::vector<StateId> stack;
+    std::vector<StateId> reachableStates;
+    stack.reserve(states_.size());
+    reachableStates.reserve(states_.size());
+
+    stack.push_back(root_);
+    visited[root_] = 1;
+
+    while (!stack.empty()) {
+        const StateId stateId = stack.back();
+        stack.pop_back();
+        reachableStates.push_back(stateId);
+
+        for (const auto &transition : states_[stateId].transitions) {
+            if (visited[transition.target] != 0) {
+                continue;
+            }
+
+            visited[transition.target] = 1;
+            stack.push_back(transition.target);
+        }
+    }
+
+    std::sort(reachableStates.begin(), reachableStates.end());
+
+    dot << "    start [shape=point];\n";
+    dot << "    start -> s" << root_ << ";\n";
+
+    for (const StateId stateId : reachableStates) {
+        dot << "    s" << stateId
+            << " [shape=" << (states_[stateId].isFinal ? "doublecircle"
+                                                        : "circle")
+            << "];\n";
+    }
+
+    for (const StateId stateId : reachableStates) {
+        for (const auto &transition : states_[stateId].transitions) {
+            dot << "    s" << stateId << " -> s" << transition.target
+                << " [label=\"" << escapeDotLabel(transition.symbol)
+                << "\"];\n";
+        }
+    }
+
+    dot << "}\n";
+    return dot.str();
+}
+
+bool Lexicon::exportToDotFile(const std::string &path) const {
+    std::ofstream output(path);
+    if (!output) {
+        return false;
+    }
+
+    output << exportToDot();
+    return static_cast<bool>(output);
 }
 
 void Lexicon::clear() {
@@ -222,12 +340,31 @@ std::string Lexicon::normalize(const std::string &word) const {
         return word;
     }
 
-    std::string normalized = word;
-    std::transform(
-        normalized.begin(), normalized.end(), normalized.begin(),
-        [](unsigned char character) {
-            return static_cast<char>(std::tolower(character));
-        });
+    std::string normalized;
+    normalized.reserve(word.size());
+
+    for (std::size_t i = 0; i < word.size(); ++i) {
+        const unsigned char character = static_cast<unsigned char>(word[i]);
+
+        if (character < 0x80U) {
+            normalized.push_back(
+                static_cast<char>(std::tolower(character)));
+            continue;
+        }
+
+        // The automaton stores UTF-8 bytes as transitions, so case folding is
+        // handled here for ASCII and explicit Polish uppercase code points.
+        if (i + 1 < word.size()) {
+            appendLowercasePolishUtf8(
+                normalized, character,
+                static_cast<unsigned char>(word[i + 1]));
+            ++i;
+            continue;
+        }
+
+        normalized.push_back(static_cast<char>(character));
+    }
+
     return normalized;
 }
 
