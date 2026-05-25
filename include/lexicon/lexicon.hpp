@@ -9,6 +9,7 @@
 #define lexicon_h
 
 #include <cstddef>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -32,6 +33,54 @@ class Lexicon {
   public:
     using value_type = std::string;
     using size_type = std::size_t;
+
+    class const_iterator {
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = std::string;
+        using difference_type = std::ptrdiff_t;
+        using reference = const value_type &;
+        using pointer = const value_type *;
+
+        const_iterator() = default;
+
+        [[nodiscard]] reference operator*() const noexcept;
+        [[nodiscard]] pointer operator->() const noexcept;
+
+        const_iterator &operator++();
+        const_iterator operator++(int);
+
+        friend bool operator==(const const_iterator &lhs,
+                               const const_iterator &rhs) noexcept;
+
+        friend bool operator!=(const const_iterator &lhs,
+                               const const_iterator &rhs) noexcept {
+            return !(lhs == rhs);
+        }
+
+      private:
+        friend class Lexicon;
+
+        struct Frame {
+            std::size_t state = 0;
+            std::size_t nextTransition = 0;
+            std::size_t pathLength = 0;
+            bool yielded = false;
+        };
+
+        explicit const_iterator(const Lexicon *lexicon);
+        const_iterator(const Lexicon *lexicon, const std::u32string &word);
+
+        void advanceToNextWord();
+        [[nodiscard]] bool isEnd() const noexcept;
+
+        const Lexicon *lexicon_ = nullptr;
+        std::vector<Frame> stack_;
+        std::u32string currentSymbols_;
+        std::string currentWord_;
+    };
+
+    using iterator = const_iterator;
 
     explicit Lexicon(CaseMode mode = CaseMode::Insensitive)
         : caseMode_(mode) {}
@@ -57,7 +106,37 @@ class Lexicon {
      * @param word Query word.
      * @return true when the word is accepted by the automaton.
      */
-    [[nodiscard]] bool contains(const value_type word) const;
+    [[nodiscard]] bool contains(const value_type &word) const;
+
+    /**
+     * @brief Returns an iterator to a word, or end() when it is absent.
+     */
+    [[nodiscard]] const_iterator find(const value_type &word) const;
+
+    /**
+     * @brief Returns 1 if the word exists, otherwise 0.
+     */
+    [[nodiscard]] size_type count(const value_type &word) const;
+
+    /**
+     * @brief Returns an iterator to the first stored word.
+     */
+    [[nodiscard]] const_iterator begin() const;
+
+    /**
+     * @brief Returns the past-the-end iterator.
+     */
+    [[nodiscard]] const_iterator end() const noexcept;
+
+    /**
+     * @brief Returns an iterator to the first stored word.
+     */
+    [[nodiscard]] const_iterator cbegin() const;
+
+    /**
+     * @brief Returns the past-the-end iterator.
+     */
+    [[nodiscard]] const_iterator cend() const noexcept;
 
     /**
      * @brief Returns whether the lexicon contains any words.
@@ -70,11 +149,9 @@ class Lexicon {
     [[nodiscard]] size_type size() const noexcept;
 
     /**
-     * @brief Returns the number of allocated states stored by the builder.
+     * @brief Returns the number of states stored by the current automaton.
      *
-     * This is a structural metric useful for debugging and comparisons. It does
-     * not attempt to compact the internal storage after state merging, so it
-     * can be larger than the number of states reachable in the final DFA.
+     * After build finalization this matches the compacted reachable DFA.
      */
     [[nodiscard]] size_type stateCount() const noexcept;
 
@@ -87,6 +164,25 @@ class Lexicon {
      * @brief Returns the number of outgoing transitions from reachable states.
      */
     [[nodiscard]] size_type transitionCount() const noexcept;
+
+    /**
+     * @brief Returns allocated states recorded before final minimization.
+     */
+    [[nodiscard]] size_type preMinimizationStateCount() const noexcept;
+
+    /**
+     * @brief Estimates memory recorded before final minimization in bytes.
+     */
+    [[nodiscard]] size_type preMinimizationMemoryUsageEstimate() const noexcept;
+
+    /**
+     * @brief Estimates memory used by the reachable DFA in bytes.
+     *
+     * Counts only states and transitions reachable from the root. It excludes
+     * unreachable builder storage and implementation-specific allocator
+     * bookkeeping.
+     */
+    [[nodiscard]] size_type memoryUsageEstimate() const noexcept;
 
     /**
      * @brief Exports the reachable part of the automaton as Graphviz DOT.
@@ -105,10 +201,12 @@ class Lexicon {
 
   private:
     using StateId = std::size_t;
+    using Symbol = char32_t;
+    using SymbolString = std::u32string;
     static constexpr StateId invalidState = static_cast<StateId>(-1);
 
     struct Transition {
-        char symbol{};
+        Symbol symbol{};
         StateId target{invalidState};
 
         [[nodiscard]] bool operator==(const Transition &other) const noexcept;
@@ -121,7 +219,7 @@ class Lexicon {
 
     struct UncheckedNode {
         StateId parent{invalidState};
-        char symbol{};
+        Symbol symbol{};
         StateId child{invalidState};
     };
 
@@ -148,12 +246,17 @@ class Lexicon {
      *
      * The word must not be smaller than the previous inserted word.
      */
-    void insertSorted(const std::string &word);
+    void insertSorted(const SymbolString &word);
 
     /**
      * @brief Finalizes the automaton by minimizing the remaining unchecked path.
      */
     void finish();
+
+    /**
+     * @brief Removes states that are no longer reachable after minimization.
+     */
+    void compactReachableStates();
 
     /**
      * @brief Minimizes unchecked suffix states that are deeper than prefixLen.
@@ -173,7 +276,7 @@ class Lexicon {
     /**
      * @brief Redirects one outgoing edge to a canonical child state.
      */
-    void replaceTransitionTarget(StateId parent, char symbol,
+    void replaceTransitionTarget(StateId parent, Symbol symbol,
                                  StateId newTarget);
 
     /**
@@ -184,8 +287,8 @@ class Lexicon {
     /**
      * @brief Computes the common prefix length for two strings.
      */
-    [[nodiscard]] static std::size_t commonPrefixLength(std::string_view a,
-                                                        std::string_view b);
+    [[nodiscard]] static std::size_t commonPrefixLength(std::u32string_view a,
+                                                        std::u32string_view b);
 
     /**
      * @brief Appends a new state to the internal storage.
@@ -195,19 +298,31 @@ class Lexicon {
     /**
      * @brief Normalizes one lookup key before build/search.
      */
-    [[nodiscard]] std::string normalize(const std::string &word) const;
+    [[nodiscard]] SymbolString normalize(const std::string &word) const;
 
     /**
      * @brief Counts reachable states and transitions from the root.
      */
     [[nodiscard]] ReachableMetrics reachableMetrics() const noexcept;
 
+    /**
+     * @brief Traverses only states reachable from root_ using iterative DFS.
+     */
+    [[nodiscard]] std::vector<StateId> reachableStatesDepthFirst() const;
+
+    /**
+     * @brief Estimates memory currently held by allocated builder storage.
+     */
+    [[nodiscard]] size_type allocatedMemoryUsageEstimate() const noexcept;
+
     std::vector<State> states_;
     std::unordered_map<StateSignature, StateId, SignatureHash> registry_;
     std::vector<UncheckedNode> uncheckedPath_;
 
-    std::string previousWord_;
+    SymbolString previousWord_;
     size_type wordCount_ = 0;
+    size_type preMinimizationStateCount_ = 0;
+    size_type preMinimizationMemoryUsageEstimate_ = 0;
     bool finalized_ = false;
     StateId root_ = invalidState;
     // The mode is fixed at construction because the DFA is built from

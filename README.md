@@ -7,8 +7,11 @@ membership checks with compact shared suffixes.
 ## What The Library Provides
 
 - Incremental construction of a minimal DFA from a sorted word list
-- Exact lookup through `lexicon::Lexicon::contains`
-- Simple metrics for inserted word count and internal state count
+- Configurable case-sensitive or case-insensitive lookup
+- Exact lookup through `lexicon::Lexicon::contains`, `find` and `count`
+- STL-style iteration over stored words
+- Diagnostic metrics for states, transitions and estimated memory usage
+- Graphviz DOT export for visualizing the reachable automaton
 - A small example program in `examples/main.cpp`
 
 ## Project Layout
@@ -22,27 +25,61 @@ membership checks with compact shared suffixes.
 
 The main type is `lexicon::Lexicon`.
 
+- `explicit Lexicon(CaseMode mode = CaseMode::Insensitive)`
+  Creates a lexicon. Case mode is fixed for the object because the DFA is built
+  from normalized keys.
 - `buildFromSorted(const std::vector<std::string>& words)`
   Rebuilds the automaton from a lexicographically sorted collection of words.
-  Duplicate words are ignored. Unsorted input causes `std::invalid_argument`.
-- `contains(std::string word) const`
+  Duplicate words are ignored. Input must be sorted for the selected case mode.
+  Unsorted input causes `std::invalid_argument`.
+- `contains(const std::string& word) const`
   Returns `true` only for exact words stored in the lexicon.
+- `find(const std::string& word) const`
+  Returns an iterator to the stored word, or `end()` when it is absent.
+- `count(const std::string& word) const`
+  Returns `1` if the word exists, otherwise `0`.
+- `begin()`, `end()`, `cbegin()`, `cend()`
+  Iterate over stored words in lexicographical order. In case-insensitive mode,
+  iteration returns normalized words.
 - `empty() const`
   Checks whether any words were inserted.
 - `size() const`
   Returns the number of distinct inserted words.
-- `stateCount() const`
-  Returns the number of states currently stored by the builder.
 - `clear()`
   Removes all current data.
 
+Diagnostic and visualization API:
+
+- `stateCount() const`
+  Returns the number of states stored after final minimization and compaction.
+- `reachableStateCount() const`
+  Returns the number of states reachable from the root.
+- `transitionCount() const`
+  Returns the number of outgoing transitions from reachable states.
+- `preMinimizationStateCount() const`
+  Returns the state count captured just before final minimization.
+- `preMinimizationMemoryUsageEstimate() const`
+  Estimates builder memory captured just before final minimization.
+- `memoryUsageEstimate() const`
+  Estimates memory used by the compacted reachable DFA.
+- `exportToDot() const`
+  Returns a Graphviz DOT representation of the reachable automaton.
+- `exportToDotFile(const std::string& path) const`
+  Writes the DOT representation to a file.
+
 ## Important Constraints
 
-- Input passed to `buildFromSorted` must already be sorted lexicographically.
-- Lookups are case-sensitive.
+- Input passed to `buildFromSorted` must already be sorted lexicographically for
+  the selected `CaseMode`.
+- Default lookup is case-insensitive. Use `Lexicon(CaseMode::Sensitive)` for
+  case-sensitive behavior.
+- UTF-8 input is decoded to code points, so Polish letters such as `l` with
+  stroke or `z` with dot are treated as single transition symbols.
 - Prefixes are not matches unless they were inserted as complete words.
-- `stateCount()` is a diagnostic metric for internal storage, not a formal
-  promise about the compacted canonical automaton size.
+- Case folding is intentionally limited to ASCII and explicit Polish uppercase
+  letters used by the project. Full Unicode case folding is out of scope.
+- `memoryUsageEstimate()` and the set comparisons in the demo are estimates,
+  not allocator-exact process memory measurements.
 
 ## Build
 
@@ -68,6 +105,7 @@ The commands produce:
 
 int main() {
     std::vector<std::string> words = {
+        "Apple",
         "car",
         "card",
         "care",
@@ -85,8 +123,35 @@ int main() {
     std::cout << std::boolalpha;
     std::cout << dictionary.contains("car") << '\n';
     std::cout << dictionary.contains("cow") << '\n';
+
+    for (const auto& word : dictionary) {
+        std::cout << word << '\n';
+    }
+
+    if (auto it = dictionary.find("APPLE"); it != dictionary.end()) {
+        std::cout << "found: " << *it << '\n';
+    }
 }
 ```
+
+The default lexicon is case-insensitive, so the example stores and iterates over
+normalized words. Construct `lexicon::Lexicon dictionary(lexicon::CaseMode::Sensitive);`
+to keep case distinctions.
+
+## Demo Program
+
+```bash
+./build/lexicon_demo
+./build/lexicon_demo -cs
+./build/lexicon_demo -f words.txt
+./build/lexicon_demo -dot
+./build/lexicon_demo -dot graphs/example.dot
+```
+
+- `-cs` enables case-sensitive mode.
+- `-f WORDS_FILE` loads words from a file.
+- `-dot [DOT_FILE]` exports Graphviz DOT. Without a path, the demo writes to
+  `graphs/YYYYMMDD_HHMMSS.dot`.
 
 ## How Construction Works
 
