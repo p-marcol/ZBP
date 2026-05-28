@@ -26,14 +26,20 @@ enum class CaseMode {
  * @brief Minimal deterministic finite automaton built from a sorted word list.
  *
  * The class implements incremental construction of a minimal DFA for whole-word
- * lookup. Input words must be provided in lexicographical order. Duplicate
- * entries are ignored.
+ * lookup. Input words must be provided in lexicographical order for the current
+ * case mode. Duplicate entries after normalization are ignored.
  */
 class Lexicon {
   public:
     using value_type = std::string;
     using size_type = std::size_t;
 
+    /**
+     * @brief Forward iterator over words accepted by the lexicon.
+     *
+     * Iteration is lazy and reconstructs words from automaton paths. In
+     * case-insensitive mode returned words use the normalized representation.
+     */
     class const_iterator {
       public:
         using iterator_category = std::forward_iterator_tag;
@@ -82,6 +88,12 @@ class Lexicon {
 
     using iterator = const_iterator;
 
+    /**
+     * @brief Creates an empty lexicon with fixed case handling.
+     *
+     * The mode is part of construction because words are normalized before they
+     * are inserted into the DFA.
+     */
     explicit Lexicon(CaseMode mode = CaseMode::Insensitive)
         : caseMode_(mode) {}
 
@@ -89,7 +101,7 @@ class Lexicon {
      * @brief Rebuilds the automaton from a lexicographically sorted word list.
      *
      * The current contents are discarded before construction starts. Words that
-     * compare equal to the previous entry are skipped.
+     * normalize to the same key as the previous entry are skipped.
      *
      * @param words Source dictionary ordered lexicographically for the current
      * case mode.
@@ -100,6 +112,7 @@ class Lexicon {
     /**
      * @brief Checks whether the exact word exists in the lexicon.
      *
+     * The query is normalized according to the lexicon case mode before lookup.
      * Prefixes are not treated as matches unless they were inserted as complete
      * words.
      *
@@ -110,6 +123,9 @@ class Lexicon {
 
     /**
      * @brief Returns an iterator to a word, or end() when it is absent.
+     *
+     * In case-insensitive mode the iterator points to the normalized stored
+     * word, not necessarily the original spelling from input.
      */
     [[nodiscard]] const_iterator find(const value_type &word) const;
 
@@ -120,6 +136,9 @@ class Lexicon {
 
     /**
      * @brief Returns an iterator to the first stored word.
+     *
+     * Words are produced in lexicographical order of their stored normalized
+     * representation.
      */
     [[nodiscard]] const_iterator begin() const;
 
@@ -130,6 +149,8 @@ class Lexicon {
 
     /**
      * @brief Returns an iterator to the first stored word.
+     *
+     * Equivalent to begin().
      */
     [[nodiscard]] const_iterator cbegin() const;
 
@@ -157,6 +178,8 @@ class Lexicon {
 
     /**
      * @brief Returns the number of states reachable from the root state.
+     *
+     * After build finalization this should match stateCount().
      */
     [[nodiscard]] size_type reachableStateCount() const noexcept;
 
@@ -166,17 +189,20 @@ class Lexicon {
     [[nodiscard]] size_type transitionCount() const noexcept;
 
     /**
-     * @brief Returns allocated states recorded before final minimization.
+     * @brief Returns allocated states recorded before finalization.
      */
     [[nodiscard]] size_type preMinimizationStateCount() const noexcept;
 
     /**
-     * @brief Estimates memory recorded before final minimization in bytes.
+     * @brief Estimates builder working memory recorded before finalization.
+     *
+     * This includes temporary construction data such as the registry,
+     * unchecked path and allocated vector capacity.
      */
     [[nodiscard]] size_type preMinimizationMemoryUsageEstimate() const noexcept;
 
     /**
-     * @brief Estimates memory used by the reachable DFA in bytes.
+     * @brief Estimates memory used by the compacted reachable DFA in bytes.
      *
      * Counts only states and transitions reachable from the root. It excludes
      * unreachable builder storage and implementation-specific allocator
@@ -296,7 +322,7 @@ class Lexicon {
     [[nodiscard]] StateId createState(bool isFinal);
 
     /**
-     * @brief Normalizes one lookup key before build/search.
+     * @brief Decodes UTF-8 and normalizes one key before build/search.
      */
     [[nodiscard]] SymbolString normalize(const std::string &word) const;
 

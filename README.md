@@ -57,9 +57,10 @@ Diagnostic and visualization API:
 - `transitionCount() const`
   Returns the number of outgoing transitions from reachable states.
 - `preMinimizationStateCount() const`
-  Returns the state count captured just before final minimization.
+  Returns the allocated state count captured just before finalization.
 - `preMinimizationMemoryUsageEstimate() const`
-  Estimates builder memory captured just before final minimization.
+  Estimates builder working memory captured just before finalization. This
+  includes temporary construction data such as the registry and unchecked path.
 - `memoryUsageEstimate() const`
   Estimates memory used by the compacted reachable DFA.
 - `exportToDot() const`
@@ -73,8 +74,8 @@ Diagnostic and visualization API:
   the selected `CaseMode`.
 - Default lookup is case-insensitive. Use `Lexicon(CaseMode::Sensitive)` for
   case-sensitive behavior.
-- UTF-8 input is decoded to code points, so Polish letters such as `l` with
-  stroke or `z` with dot are treated as single transition symbols.
+- UTF-8 input is decoded to code points, so Polish letters such as `ł` or `ż`
+  are treated as single transition symbols.
 - Prefixes are not matches unless they were inserted as complete words.
 - Case folding is intentionally limited to ASCII and explicit Polish uppercase
   letters used by the project. Full Unicode case folding is out of scope.
@@ -82,6 +83,24 @@ Diagnostic and visualization API:
   not allocator-exact process memory measurements.
 
 ## Build
+
+Unix/macOS:
+
+```bash
+./build.sh
+```
+
+Windows:
+
+```bat
+build.bat
+```
+
+The Windows script is provided for convenience, but it has not been tested on
+Windows and may require small adjustments for a specific compiler, generator, or
+CMake installation.
+
+Manual CMake build:
 
 ```bash
 cmake -S . -B build
@@ -105,7 +124,7 @@ The commands produce:
 
 int main() {
     std::vector<std::string> words = {
-        "Apple",
+        "apple",
         "car",
         "card",
         "care",
