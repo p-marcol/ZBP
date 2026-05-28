@@ -43,8 +43,19 @@
 # build directory
 /build/
 
-#words directory
+# words directory
 /words/
 
-#graphs directory
+# graphs directory
 /graphs/
+
+# vscode settings
+.vscode/
+
+# tex build files
+*.nav
+*.snm
+*.synctex.gz
+*.vrb
+*.log
+**/_minted*/
